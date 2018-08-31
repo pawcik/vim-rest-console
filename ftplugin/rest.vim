@@ -462,19 +462,30 @@ function! s:GetCurlCommand(request)
 
   """ Convert cUrl options to command line arguments.
   let curlArgs = vrc#opt#DictToCurlArgs(curlOpts)
-  call map(curlArgs, 's:EscapeCurlOpt(v:val)')
+  "call map(curlArgs, 's:EscapeCurlOpt(v:val)')
 
   """ Add http verb.
   let httpVerb = a:request.httpVerb
-  call add(curlArgs, s:GetCurlRequestOpt(httpVerb))
+  "call add(curlArgs, s:GetCurlRequestOpt(httpVerb))
+
+  let argsCurl = insert(deepcopy(curlArgs), 'curl', 0)
+
+  call extend(argsCurl, split(s:GetCurlRequestOpt(httpVerb)))
+  if !empty(a:request.dataBody)
+    let data = s:GetCurlDataArgs(a:request)
+    echom join(data,',')
+    call extend(argsCurl, data)
+  endif
 
   """ Add data body.
   if !empty(a:request.dataBody)
     call add(curlArgs, s:GetCurlDataArgs(a:request))
   endif
+  call add(argsCurl, a:request.host . a:request.requestPath)
   return [
     \ 'curl ' . join(curlArgs) . ' ' . shellescape(a:request.host . a:request.requestPath),
-    \ curlOpts
+    \ curlOpts,
+    \ argsCurl,
   \]
 endfunction
 
@@ -529,7 +540,7 @@ function! s:GetCurlDataArgs(request)
 
     """ If request body is split line by line.
     if s:GetOpt('vrc_split_request_body', 0)
-      call map(dataLines, '"--data " . shellescape(v:val)')
+      call map(dataLines, '"--data " . v:val')
       return join(dataLines)
     endif
 
@@ -547,7 +558,7 @@ function! s:GetCurlDataArgs(request)
     endif
 
     """ Otherwise, just join data using empty space.
-    return '--data ' . shellescape(join(dataLines, ''))
+    return ['--data', join(dataLines, '')]
   endif
 
   """ If verb is GET and GET request body is allowed.
@@ -700,28 +711,36 @@ function! s:RunQuery(start, end)
       return
     endif
 
-    let [curlCmd, curlOpts] = s:GetCurlCommand(request)
+    let [curlCmd, curlOpts, curlArgs] = s:GetCurlCommand(request)
     if shouldDebug
       echom '[Debug] Command: ' . curlCmd
       echom '[Debug] cUrl options: ' . string(curlOpts)
     endif
-    silent !clear
-    redraw!
+    "silent !clear
+    "redraw!
 
-    call add(outputInfo['outputChunks'], system(curlCmd))
-    if shouldShowCommand
-      call add(outputInfo['commands'], curlCmd)
-    endif
+    let origWin = bufnr('%')
+    "let job2 = job_start(['curl', 'onet.pl'], {'callback': 'Callback', 'out_io': 'pipe'})
+    let asyncBufName = '__REST_response_async__'
+    let bufnumer = bufnr(asyncBufName)
+    execute bufnumer . "bufdo exec 'silent! normal! ggdG'"
+    execute 'b'.origWin
+    let job = job_start(curlArgs, {'out_io': 'buffer', 'out_name': asyncBufName, 'out_msg': ''})
+
+    "call add(outputInfo['outputChunks'], system(curlCmd))
+    "if shouldShowCommand
+    "  call add(outputInfo['commands'], curlCmd)
+    "endif
     let resumeFrom = request.resumeFrom
   endwhile
 
-  call s:DisplayOutput(
-    \ s:GetOpt('vrc_output_buffer_name', '__REST_response__'),
-    \ outputInfo,
-    \ {
-      \ 'hasResponseHeader': vrc#opt#DictHasKeys(curlOpts, ['-i', '--include'])
-    \ }
-  \)
+  " call s:DisplayOutput(
+  "   \ s:GetOpt('vrc_output_buffer_name', '__REST_response__'),
+  "   \ outputInfo,
+  "   \ {
+  "     \ 'hasResponseHeader': vrc#opt#DictHasKeys(curlOpts, ['-i', '--include'])
+  "   \ }
+  " \)
 endfunction
 
 """
